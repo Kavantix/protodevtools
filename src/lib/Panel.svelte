@@ -2,7 +2,7 @@
   import { fade, fly, slide } from "svelte/transition";
   import { backOut } from "svelte/easing";
 
-  import { type Request } from "./requests.svelte";
+  import { type Request, GrpcStatusCode } from "./requests.svelte";
   import { JsonView } from "@zerodevx/svelte-json-view";
   const {
     isOpen,
@@ -80,6 +80,14 @@ BigInt.prototype.toJSON = function () {
         {/if}
 
         {#if activeTab == "response"}
+          {#if request?.grpcStatus}
+          <h2>Status: Grpc {GrpcStatusCode[request?.grpcStatus?.code]}</h2>
+            {#if request?.grpcStatus?.message}
+            <p>Message: {request?.grpcStatus?.message}</p>
+            {/if}
+          {:else}
+          <h2>Status: Http {request?.status}</h2>
+          {/if}
           {@render renderJSON(request?.response?.data)}
         {/if}
       </div>

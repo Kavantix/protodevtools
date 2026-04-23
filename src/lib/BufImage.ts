@@ -14,7 +14,7 @@ import path from "path-browserify-esm";
 
 export function extractInfoFromURL(rawURL: string) {
   const url = new URL(rawURL);
-  const serviceName = path.dirname(url.pathname).replace("/", "");
+  const serviceName = path.dirname(url.pathname).split("/").pop();
   const methodName = path.basename(url.pathname);
   return {
     serviceName,

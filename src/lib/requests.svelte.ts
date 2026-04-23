@@ -6,6 +6,7 @@ import { humanizeResponse, humanizeRequest } from "./BufImage";
 import fileRegistry from "./fileRegistry.svelte";
 import requestJSON from "./testfiles/localdev/request.json";
 import responseJSON from "./testfiles/localdev/response.json";
+import type { Header } from "har-format";
 
 function recurse(obj: any, parsedData: any) {
   for (let p of parsedData.parts) {
@@ -286,41 +287,57 @@ const addRequest = (
     data: data,
     url: entry.request.url,
     method: entry.request.method as "POST" | "GET",
+    status: entry.response.status,
   };
   requests.push(request);
-  entry.getContent((body) => {
-    // the body is always base64 at least once
-    const bodyDecoded = base64Decode(body ?? "");
-    const messageType = parseMessageType(entry.response.headers);
-    const bytes = Buffer.from(
-      messageType === "base64"
-        ? base64Decode(textDecoder.decode(bodyDecoded))
-        : bodyDecoded,
-    );
-    console.debug("response bytes", bytes, "messageType", messageType);
-    try {
-      if (fileRegistry.activeFileRegistry) {
-        request.response = {
-          rawData: body,
-          data: humanizeResponse(
-            fileRegistry.activeFileRegistry.fileRegistry,
-            bytes,
-            request.url,
-          ),
-        };
-      } else {
-        const recursed = recurse({}, decodeProto(bytes));
-        request.response = { data: recursed, rawData: body };
-      }
-      const index = requests.findIndex(
-        (r) => r.requestTime.getTime() === request.requestTime.getTime(),
-      );
-      if (index !== -1) {
-        requests[index] = request;
-      }
-    } catch (e) {
-      console.log("error decoding response", e);
-    }
+  entry.getContent((_) => {
+    setTimeout(() => {
+      entry.getContent((body) => {
+        // the body is always base64 at least once
+        const bodyDecoded = base64Decode(body ?? "");
+        const messageType = parseMessageType(entry.response.headers);
+        const bytes = Buffer.from(
+          messageType === "base64"
+            ? base64Decode(textDecoder.decode(bodyDecoded))
+            : bodyDecoded,
+        );
+        console.debug(
+          "url",
+          request.url,
+          "response bytes",
+          bytes,
+          "messageType",
+          messageType,
+        );
+        request.status = entry.response.status;
+        if (request.status == 200) {
+          request.grpcStatus = parseGrpcStatus(entry.response.headers);
+        }
+        try {
+          if (fileRegistry.activeFileRegistry) {
+            request.response = {
+              rawData: body,
+              data: humanizeResponse(
+                fileRegistry.activeFileRegistry.fileRegistry,
+                bytes,
+                request.url,
+              ),
+            };
+          } else {
+            const recursed = recurse({}, decodeProto(bytes));
+            request.response = { data: recursed, rawData: body };
+          }
+          const index = requests.findIndex(
+            (r) => r.requestTime.getTime() === request.requestTime.getTime(),
+          );
+          if (index !== -1) {
+            requests[index] = request;
+          }
+        } catch (e) {
+          console.log("error decoding response", e);
+        }
+      });
+    }, 50);
   });
 };
 
@@ -345,7 +362,14 @@ if (chrome?.devtools?.network?.onRequestFinished?.addListener) {
           ? base64Decode(new TextDecoder().decode(body))
           : body,
       );
-      console.debug("response bytes", bytes, "messageType", messageType);
+      console.debug(
+        "url",
+        r.url,
+        "response bytes",
+        bytes,
+        "messageType",
+        messageType,
+      );
       try {
         if (fileRegistry.activeFileRegistry) {
           r.response = {
@@ -389,12 +413,41 @@ type Response = {
   rawData: any;
 };
 
+export enum GrpcStatusCode {
+  OK,
+  CANCELLED,
+  UNKNOWN,
+  INVALID_ARGUMENT,
+  DEADLINE_EXCEEDED,
+  NOT_FOUND,
+  ALREADY_EXISTS,
+  PERMISSION_DENIED,
+  RESOURCE_EXHAUSTED,
+  FAILED_PRECONDITION,
+  ABORTED,
+  OUT_OF_RANGE,
+  UNIMPLEMENTED,
+  INTERNAL,
+  UNAVAILABLE,
+  DATA_LOSS,
+  UNAUTHENTICATED,
+}
+
 export type Request = {
   requestTime: Date;
   data: any;
   url: string;
   method: "POST" | "GET";
   response?: Response;
+  status: number;
+  grpcStatus?:
+    | {
+        code: GrpcStatusCode.OK;
+      }
+    | {
+        code: GrpcStatusCode;
+        message?: string;
+      };
 };
 
 export default {
@@ -405,3 +458,27 @@ export default {
     requests.push(r);
   },
 };
+function parseGrpcStatus(
+  headers: Header[],
+):
+  | { code: GrpcStatusCode.OK }
+  | { code: GrpcStatusCode; message?: string }
+  | undefined {
+  const grpcStatusHeader = headers.find(
+    (header) => header.name.toLowerCase() === "grpc-status",
+  );
+  if (!grpcStatusHeader) {
+    return { code: GrpcStatusCode.OK };
+  }
+  const grpcStatus = parseInt(grpcStatusHeader.value, 10);
+  if (grpcStatus === GrpcStatusCode.OK) {
+    return { code: GrpcStatusCode.OK };
+  }
+  const grpcMessageHeader = headers.find(
+    (header) => header.name.toLowerCase() === "grpc-message",
+  );
+  return {
+    code: grpcStatus,
+    message: grpcMessageHeader?.value,
+  };
+}
