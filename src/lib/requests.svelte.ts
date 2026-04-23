@@ -226,37 +226,109 @@ function base64Encode(input: string): string {
   return Buffer.from(input).toString("base64");
 }
 
-if (chrome?.devtools?.network?.onRequestFinished?.addListener) {
-  chrome.devtools.network.onRequestFinished.addListener((request: any) => {
-    if (request.request.method != "POST") {
-      return;
-    }
-    console.debug("request", request);
-    const messageType = parseMessageType(request.request.headers);
-    if (!messageType) {
-      console.debug("skipping non-grpc request", request.request.url);
-      return;
-    }
+const rawRequests: HARFormatEntry[] = [];
+let lastStartedDateTime = "2000-01-01T00:00:00.000Z";
 
+const textDecoder = new TextDecoder();
+setInterval(() => {
+  chrome?.devtools?.network?.getHAR((har) => {
+    const newEntries = har.entries.filter(
+      (e) =>
+        e.request.method === "POST" && e.startedDateTime > lastStartedDateTime,
+    );
+    for (const entry of newEntries) {
+      rawRequests.push(entry);
+      lastStartedDateTime = entry.startedDateTime;
+      console.debug("new entry", entry);
+      addRequest(entry as any);
+    }
+  });
+}, 500);
+
+const addRequest = (
+  entry: HARFormatEntry & {
+    getContent(callback: (content?: string) => void): void;
+  },
+) => {
+  console.debug("request", entry);
+  const messageType = parseMessageType(entry.request.headers);
+  if (!messageType) {
+    console.debug("skipping non-grpc request", entry.request.url);
+    return;
+  }
+  if (!entry.request.postData || !entry.request.postData.text) {
+    console.debug("skipping request with no post data", entry.request.url);
+    return;
+  }
+
+  const bytes = Buffer.from(
+    messageType === "base64"
+      ? base64Decode(entry.request.postData!.text!)
+      : entry.request.postData!.text,
+  );
+
+  let data: any = {};
+  try {
+    if (fileRegistry.activeFileRegistry) {
+      data = humanizeRequest(
+        fileRegistry.activeFileRegistry.fileRegistry,
+        bytes,
+        entry.request.url,
+      );
+    } else {
+      data = recurse({}, decodeProto(bytes));
+    }
+  } catch (e) {
+    console.log("error decoding proto", e);
+  }
+  const request: Request = {
+    requestTime: new Date(entry.startedDateTime),
+    data: data,
+    url: entry.request.url,
+    method: entry.request.method as "POST" | "GET",
+  };
+  requests.push(request);
+  entry.getContent((body) => {
+    // the body is always base64 at least once
+    const bodyDecoded = base64Decode(body ?? "");
+    const messageType = parseMessageType(entry.response.headers);
     const bytes = Buffer.from(
       messageType === "base64"
-        ? base64Decode(request.request.postData.text)
-        : request.request.postData.text,
+        ? base64Decode(textDecoder.decode(bodyDecoded))
+        : bodyDecoded,
     );
-
-    let data: any = {};
+    console.debug("response bytes", bytes, "messageType", messageType);
     try {
       if (fileRegistry.activeFileRegistry) {
-        data = humanizeRequest(
-          fileRegistry.activeFileRegistry.fileRegistry,
-          bytes,
-          request.request.url,
-        );
+        request.response = {
+          rawData: body,
+          data: humanizeResponse(
+            fileRegistry.activeFileRegistry.fileRegistry,
+            bytes,
+            request.url,
+          ),
+        };
       } else {
-        data = recurse({}, decodeProto(bytes));
+        const recursed = recurse({}, decodeProto(bytes));
+        request.response = { data: recursed, rawData: body };
+      }
+      const index = requests.findIndex(
+        (r) => r.requestTime.getTime() === request.requestTime.getTime(),
+      );
+      if (index !== -1) {
+        requests[index] = request;
       }
     } catch (e) {
-      console.log("error decoding proto", e);
+      console.log("error decoding response", e);
+    }
+  });
+};
+
+if (chrome?.devtools?.network?.onRequestFinished?.addListener) {
+  chrome.devtools.network.onRequestFinished.addListener((request: any) => {
+    return;
+    if (request.request.method != "POST") {
+      return;
     }
     let r: Request = {
       requestTime: new Date(),

@@ -18,6 +18,7 @@
   function fileDropped(fileName: string, contents: ArrayBuffer) {
     fileRegistry.addFileRegistryFromBinary(fileName, new Uint8Array(contents));
   }
+
 </script>
 
 <select onchange={setActiveRegistry}>
