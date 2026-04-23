@@ -58,10 +58,9 @@ export function Humanize(
   a: Buffer,
   messageDescription: DescMessage,
 ) {
-  console.log("messageDescription", messageDescription, a);
+  console.debug("messageDescription", messageDescription, a);
   a = removeGrpcEncoding(a);
 
   const message = fromBinary(messageDescription, a);
-  console.log(message);
   return message;
 }

@@ -5,7 +5,7 @@ import {
 } from "@bufbuild/protobuf";
 import { FileDescriptorSetSchema } from "@bufbuild/protobuf/wkt";
 
-let loaded: Boolean = $state(false);
+let loaded = false;
 let registries: DevtoolFileRegistry[] = $state([]);
 let rawRegistry: Uint8Array[] = $state([]);
 

@@ -204,71 +204,95 @@ export function interpretAsTwosComplement(n: any, bits: any) {
 
 let requests: Request[] = $state([]);
 
+function parseMessageType(
+  headers: { name: string; value: string }[],
+): "base64" | "raw" | null {
+  const contentType = headers.find(
+    (h) => h.name.toLowerCase() === "content-type",
+  )?.value;
+  if (typeof contentType !== "string") {
+    return null;
+  }
+  if (contentType.includes("application/grpc-web-text")) {
+    return "base64";
+  } else if (contentType.includes("application/grpc-web+proto")) {
+    return "raw";
+  } else {
+    return null;
+  }
+}
+
 function base64Encode(input: string): string {
   return Buffer.from(input).toString("base64");
 }
 
 if (chrome?.devtools?.network?.onRequestFinished?.addListener) {
   chrome.devtools.network.onRequestFinished.addListener((request: any) => {
-    console.log("request", request);
     if (request.request.method != "POST") {
       return;
     }
+    console.debug("request", request);
+    const messageType = parseMessageType(request.request.headers);
+    if (!messageType) {
+      console.debug("skipping non-grpc request", request.request.url);
+      return;
+    }
+
+    const bytes = Buffer.from(
+      messageType === "base64"
+        ? base64Decode(request.request.postData.text)
+        : request.request.postData.text,
+    );
 
     let data: any = {};
-    const rawData = base64Encode(request.request.postData.text);
-    const text = request.request.postData.text;
     try {
       if (fileRegistry.activeFileRegistry) {
-        const buffer = Buffer.from(text);
         data = humanizeRequest(
           fileRegistry.activeFileRegistry.fileRegistry,
-          buffer,
+          bytes,
           request.request.url,
         );
       } else {
-        console.log(request.url, request);
-        console.log("reqeust base64 encoded text", rawData);
-        const reader = Buffer.from(request.request.postData.text);
-        console.log(reader.buffer);
-        data = recurse({}, decodeProto(reader));
-        console.log("request parsed response", data);
+        data = recurse({}, decodeProto(bytes));
       }
     } catch (e) {
-      console.log("error decoding proto", e)
+      console.log("error decoding proto", e);
     }
     let r: Request = {
       requestTime: new Date(),
       data,
-      rawData,
-      text,
       url: request.request.url,
       method: "POST",
     };
     request.getContent((body: any) => {
-      console.log("response body", body, r.url);
+      // the body is always base64 at least once
+      body = base64Decode(body);
+      const messageType = parseMessageType(request.response.headers);
+      const bytes = Buffer.from(
+        messageType === "base64"
+          ? base64Decode(new TextDecoder().decode(body))
+          : body,
+      );
+      console.debug("response bytes", bytes, "messageType", messageType);
       try {
         if (fileRegistry.activeFileRegistry) {
-          const b = Buffer.from(base64Decode(body));
           r.response = {
             rawData: body,
             data: humanizeResponse(
               fileRegistry.activeFileRegistry.fileRegistry,
-              b,
+              bytes,
               r.url,
             ),
           };
         } else {
-          const parsedResponse = decodeProto(Buffer.from(body, "base64"));
-          const recursed = recurse({}, parsedResponse);
-          console.dir(recursed, { depth: null });
+          const recursed = recurse({}, decodeProto(bytes));
           r.response = {
             data: recursed,
             rawData: body,
           };
         }
       } catch (e) {
-        console.log("error decoding response", e)
+        console.log("error decoding response", e);
       }
       requests.push(r);
     });
@@ -279,7 +303,6 @@ if (chrome?.devtools?.network?.onRequestFinished?.addListener) {
   requests.push({
     requestTime: new Date(),
     data: requestJSON,
-    text: "",
     url: "http://localhost:8080/greeter.Greeter/SayHello",
     method: "POST",
     response: {
@@ -297,8 +320,6 @@ type Response = {
 export type Request = {
   requestTime: Date;
   data: any;
-  rawData?: any;
-  text: string;
   url: string;
   method: "POST" | "GET";
   response?: Response;
