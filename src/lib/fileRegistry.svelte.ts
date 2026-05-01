@@ -31,7 +31,7 @@ function addRegistryToDB(fileName: string, rawRegistry: Uint8Array) {
       data: rawRegistry,
     };
 
-    let request = fileRegistries.add(fileRegistry); // (3)
+    let request = fileRegistries.put(fileRegistry); // (3)
     request.onsuccess = function () {
       // (4)
       console.log("Book added to the store", request.result);
@@ -142,7 +142,10 @@ export default {
     });
   },
   addFileRegistry(registry: DevtoolFileRegistry) {
-    registries.push(registry);
+    registries = [
+      ...registries.filter((r) => r.name !== registry.name),
+      registry,
+    ];
     this.setActiveFileRegistry(registry.name);
   },
   get fileRegistries(): DevtoolFileRegistry[] {

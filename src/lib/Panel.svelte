@@ -45,9 +45,14 @@ BigInt.prototype.toJSON = function () {
             overflow-auto
             "
   >
+    <div class="flex gap-4">
     <button class="bg-gray-800 text-white p-2 rounded" onclick={closePanel}>
       ✕
     </button>
+    <button class="bg-gray-800 text-white p-2 rounded" onclick={request?.reparse}>
+      Reparse
+    </button>
+    </div>
     <div class="">
       <h3 class="text-lg font-semibold mb-2">Request Details</h3>
       <div class="flex border-b border-gray-200">

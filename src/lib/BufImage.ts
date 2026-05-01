@@ -10,6 +10,8 @@ import {
   create,
   fromBinary,
 } from "@bufbuild/protobuf";
+import { sizeDelimitedDecodeStream } from "@bufbuild/protobuf/wire";
+import { timestampDate } from "@bufbuild/protobuf/wkt";
 import path from "path-browserify-esm";
 
 export function extractInfoFromURL(rawURL: string) {
@@ -101,10 +103,7 @@ function humanizeEnums(
         const timestamp = msg[field.localName];
         console.log("timestamp", timestamp);
         if (timestamp) {
-          const seconds = Number(timestamp.seconds);
-          const nanos = timestamp.nanos;
-          const date = new Date(seconds * 1000 + nanos / 1e6);
-          msg[field.localName] = date.toISOString();
+          msg[field.localName] = timestampDate(timestamp).toISOString();
         }
         continue;
       }

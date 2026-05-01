@@ -252,161 +252,110 @@ const addRequest = (
   },
 ) => {
   console.debug("request", entry);
-  const messageType = parseMessageType(entry.request.headers);
-  if (!messageType) {
-    console.debug("skipping non-grpc request", entry.request.url);
-    return;
-  }
-  if (!entry.request.postData || !entry.request.postData.text) {
-    console.debug("skipping request with no post data", entry.request.url);
-    return;
-  }
 
-  const bytes = Buffer.from(
-    messageType === "base64"
-      ? base64Decode(entry.request.postData!.text!)
-      : entry.request.postData!.text,
-  );
-
-  let data: any = {};
-  try {
-    if (fileRegistry.activeFileRegistry) {
-      data = humanizeRequest(
-        fileRegistry.activeFileRegistry.fileRegistry,
-        bytes,
-        entry.request.url,
-      );
-    } else {
-      data = recurse({}, decodeProto(bytes));
-    }
-  } catch (e) {
-    console.log("error decoding proto", e);
-  }
-  const request: Request = {
+  const request: Partial<Request> = {
     requestTime: new Date(entry.startedDateTime),
-    data: data,
     url: entry.request.url,
     method: entry.request.method as "POST" | "GET",
-    status: entry.response.status,
   };
-  requests.push(request);
-  entry.getContent((_) => {
-    setTimeout(() => {
-      entry.getContent((body) => {
-        // the body is always base64 at least once
-        const bodyDecoded = base64Decode(body ?? "");
-        const messageType = parseMessageType(entry.response.headers);
-        const bytes = Buffer.from(
-          messageType === "base64"
-            ? base64Decode(textDecoder.decode(bodyDecoded))
-            : bodyDecoded,
-        );
-        console.debug(
-          "url",
-          request.url,
-          "response bytes",
-          bytes,
-          "messageType",
-          messageType,
-        );
-        request.status = entry.response.status;
-        if (request.status == 200) {
-          request.grpcStatus = parseGrpcStatus(entry.response.headers);
-        }
-        try {
-          if (fileRegistry.activeFileRegistry) {
-            request.response = {
-              rawData: body,
-              data: humanizeResponse(
-                fileRegistry.activeFileRegistry.fileRegistry,
-                bytes,
-                request.url,
-              ),
-            };
-          } else {
-            const recursed = recurse({}, decodeProto(bytes));
-            request.response = { data: recursed, rawData: body };
-          }
-          const index = requests.findIndex(
-            (r) => r.requestTime.getTime() === request.requestTime.getTime(),
-          );
-          if (index !== -1) {
-            requests[index] = request;
-          }
-        } catch (e) {
-          console.log("error decoding response", e);
-        }
-      });
-    }, 50);
-  });
-};
 
-if (chrome?.devtools?.network?.onRequestFinished?.addListener) {
-  chrome.devtools.network.onRequestFinished.addListener((request: any) => {
-    return;
-    if (request.request.method != "POST") {
+  const parseRequest = () => {
+    const messageType = parseMessageType(entry.request.headers);
+    if (!messageType) {
+      console.debug("skipping non-grpc request", entry.request.url);
       return;
     }
-    let r: Request = {
-      requestTime: new Date(),
-      data,
-      url: request.request.url,
-      method: "POST",
-    };
-    request.getContent((body: any) => {
-      // the body is always base64 at least once
-      body = base64Decode(body);
-      const messageType = parseMessageType(request.response.headers);
-      const bytes = Buffer.from(
-        messageType === "base64"
-          ? base64Decode(new TextDecoder().decode(body))
-          : body,
-      );
-      console.debug(
-        "url",
-        r.url,
-        "response bytes",
-        bytes,
-        "messageType",
-        messageType,
-      );
-      try {
-        if (fileRegistry.activeFileRegistry) {
-          r.response = {
-            rawData: body,
-            data: humanizeResponse(
-              fileRegistry.activeFileRegistry.fileRegistry,
-              bytes,
-              r.url,
-            ),
-          };
-        } else {
-          const recursed = recurse({}, decodeProto(bytes));
-          r.response = {
-            data: recursed,
-            rawData: body,
-          };
-        }
-      } catch (e) {
-        console.log("error decoding response", e);
-      }
-      requests.push(r);
-    });
-  });
-} else {
-  // this is not an extension right now, so add fake data
+    if (!entry.request.postData || !entry.request.postData.text) {
+      console.debug("skipping request with no post data", entry.request.url);
+      return;
+    }
 
-  requests.push({
-    requestTime: new Date(),
-    data: requestJSON,
-    url: "http://localhost:8080/greeter.Greeter/SayHello",
-    method: "POST",
-    response: {
-      data: responseJSON,
-      rawData: "",
-    },
-  });
-}
+    const bytes = Buffer.from(
+      messageType === "base64"
+        ? base64Decode(entry.request.postData!.text!)
+        : entry.request.postData!.text,
+    );
+
+    let data: any = {};
+    try {
+      if (fileRegistry.activeFileRegistry) {
+        data = humanizeRequest(
+          fileRegistry.activeFileRegistry.fileRegistry,
+          bytes,
+          entry.request.url,
+        );
+      } else {
+        data = recurse({}, decodeProto(bytes));
+      }
+    } catch (e) {
+      console.log("error decoding proto", e);
+    }
+
+    return data;
+  };
+  const parseResponse = (body: any) => {
+    // the body is always base64 at least once
+    const bodyDecoded = base64Decode(body ?? "");
+    const messageType = parseMessageType(entry.response.headers);
+    const bytes = Buffer.from(
+      messageType === "base64"
+        ? base64Decode(textDecoder.decode(bodyDecoded))
+        : bodyDecoded,
+    );
+    console.debug(
+      "url",
+      request.url,
+      "response bytes",
+      bytes,
+      "messageType",
+      messageType,
+    );
+    request.status = entry.response.status;
+    if (request.status == 200) {
+      request.grpcStatus = parseGrpcStatus(entry.response.headers);
+    }
+    try {
+      if (fileRegistry.activeFileRegistry) {
+        request.response = {
+          rawData: body,
+          data: humanizeResponse(
+            fileRegistry.activeFileRegistry.fileRegistry,
+            bytes,
+            request.url!,
+          ),
+        };
+      } else {
+        const recursed = recurse({}, decodeProto(bytes));
+        request.response = { data: recursed, rawData: body };
+      }
+      const index = requests.findIndex(
+        (r) => r.requestTime.getTime() === request.requestTime?.getTime(),
+      );
+      if (index !== -1) {
+        requests[index] = request as Request;
+      }
+    } catch (e) {
+      console.log("error decoding response", e);
+    }
+  };
+
+  const parse = () => {
+    request.data = parseRequest();
+    request.status = entry.response.status;
+    entry.getContent(parseResponse);
+    const index = requests.findIndex(
+      (r) => r.requestTime.getTime() === request.requestTime?.getTime(),
+    );
+    if (index !== -1) {
+      requests[index] = request as Request;
+    } else {
+      requests.push(request as Request);
+    }
+  };
+
+  request.reparse = parse;
+  parse();
+};
 
 type Response = {
   data: any;
@@ -440,6 +389,7 @@ export type Request = {
   method: "POST" | "GET";
   response?: Response;
   status: number;
+  reparse: () => void;
   grpcStatus?:
     | {
         code: GrpcStatusCode.OK;
